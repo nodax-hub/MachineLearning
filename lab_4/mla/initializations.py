@@ -1,182 +1,187 @@
+from typing import Tuple, Callable
+
 import numpy as np
 
+EPSILON = 1e-8
 
-def normal(shape, mean=0.0, std=0.01):
+
+def normal(shape: Tuple[int, ...], scale: float = 0.5) -> np.ndarray:
     """
-    Инициализация весов из нормального распределения.
+    Генерирует веса из нормального распределения.
 
     Args:
-        shape (tuple): Форма массива весов.
-        mean (float): Среднее значение нормального распределения.
-        std (float): Стандартное отклонение нормального распределения.
+        shape (Tuple[int, ...]): Форма выходного массива.
+        scale (float): Стандартное отклонение распределения.
 
     Returns:
         np.ndarray: Инициализированный массив.
     """
-    return np.random.normal(loc=mean, scale=std, size=shape)
+    return np.random.normal(loc=0.0, scale=scale, size=shape)
 
 
-def uniform(shape, low=-0.05, high=0.05):
+def uniform(shape: Tuple[int, ...], scale: float = 0.5) -> np.ndarray:
     """
-    Инициализация весов из равномерного распределения.
+    Генерирует веса из равномерного распределения.
 
     Args:
-        shape (tuple): Форма массива весов.
-        low (float): Нижняя граница диапазона.
-        high (float): Верхняя граница диапазона.
+        shape (Tuple[int, ...]): Форма выходного массива.
+        scale (float): Диапазон распределения [-scale, scale].
 
     Returns:
         np.ndarray: Инициализированный массив.
     """
-    return np.random.uniform(low=low, high=high, size=shape)
+    return np.random.uniform(low=-scale, high=scale, size=shape)
 
 
-def zero(shape):
+def zero(shape: Tuple[int, ...], **kwargs) -> np.ndarray:
     """
-    Инициализация весов нулями.
+    Генерирует массив, заполненный нулями.
 
     Args:
-        shape (tuple): Форма массива весов.
+        shape (Tuple[int, ...]): Форма выходного массива.
 
     Returns:
-        np.ndarray: Массив, заполненный нулями.
+        np.ndarray: Массив из нулей.
     """
     return np.zeros(shape)
 
 
-def one(shape):
+def one(shape: Tuple[int, ...], **kwargs) -> np.ndarray:
     """
-    Инициализация весов единицами.
+    Генерирует массив, заполненный единицами.
 
     Args:
-        shape (tuple): Форма массива весов.
+        shape (Tuple[int, ...]): Форма выходного массива.
 
     Returns:
-        np.ndarray: Массив, заполненный единицами.
+        np.ndarray: Массив из единиц.
     """
     return np.ones(shape)
 
 
-def orthogonal(shape, gain=1.0):
+def orthogonal(shape: Tuple[int, ...], scale: float = 0.5) -> np.ndarray:
     """
-    Инициализация весов с использованием ортогональной матрицы.
+    Генерирует ортогональный массив весов.
 
     Args:
-        shape (tuple): Форма массива весов.
-        gain (float): Множитель для масштабирования значений.
+        shape (Tuple[int, ...]): Форма выходного массива.
+        scale (float): Масштабный коэффициент.
 
     Returns:
         np.ndarray: Ортогонально инициализированный массив.
     """
     flat_shape = (shape[0], np.prod(shape[1:]))
-    a = np.random.normal(0.0, 1.0, flat_shape)
-    u, _, v = np.linalg.svd(a, full_matrices=False)
-    q = u if u.shape == flat_shape else v
-    q = q.reshape(shape)
-    return gain * q
+    array = np.random.normal(size=flat_shape)
+    u, _, v = np.linalg.svd(array, full_matrices=False)
+    array = u if u.shape == flat_shape else v
+    return np.reshape(array * scale, shape)
 
 
-def _glorot_fan(shape):
+def _glorot_fan(shape: Tuple[int, ...]) -> Tuple[float, float]:
     """
-    Вычисляет фан-ин и фан-аут для Glorot инициализации.
+    Вычисляет количество входов (fan_in) и выходов (fan_out) для слоя.
 
     Args:
-        shape (tuple): Форма массива весов.
+        shape (Tuple[int, ...]): Форма слоя.
 
     Returns:
-        tuple: fan_in и fan_out.
+        Tuple[float, float]: fan_in и fan_out.
     """
-    fan_in = shape[1] if len(shape) == 2 else np.prod(shape[1:])
-    fan_out = shape[0]
-    return fan_in, fan_out
+    assert len(shape) >= 2, "Shape must have at least two dimensions."
+    
+    if len(shape) == 4:
+        receptive_field_size = np.prod(shape[2:])
+        fan_in = shape[1] * receptive_field_size
+        fan_out = shape[0] * receptive_field_size
+    else:
+        fan_in, fan_out = shape[:2]
+    return float(fan_in), float(fan_out)
 
 
-def glorot_normal(shape):
+def glorot_normal(shape: Tuple[int, ...], **kwargs) -> np.ndarray:
     """
-    Glorot (Xavier) инициализация из нормального распределения.
+    Инициализация по методу Glorot с нормальным распределением.
 
     Args:
-        shape (tuple): Форма массива весов.
-
-    Returns:
-        np.ndarray: Инициализированный массив.
-    """
-    fan_in, fan_out = _glorot_fan(shape)
-    std = np.sqrt(2.0 / (fan_in + fan_out))
-    return normal(shape, mean=0.0, std=std)
-
-
-def glorot_uniform(shape):
-    """
-    Glorot (Xavier) инициализация из равномерного распределения.
-
-    Args:
-        shape (tuple): Форма массива весов.
+        shape (Tuple[int, ...]): Форма выходного массива.
 
     Returns:
         np.ndarray: Инициализированный массив.
     """
     fan_in, fan_out = _glorot_fan(shape)
-    limit = np.sqrt(6.0 / (fan_in + fan_out))
-    return uniform(shape, low=-limit, high=limit)
+    s = np.sqrt(2.0 / (fan_in + fan_out))
+    return normal(shape, scale=s)
 
 
-def he_normal(shape):
+def glorot_uniform(shape: Tuple[int, ...], **kwargs) -> np.ndarray:
     """
-    He инициализация из нормального распределения.
+    Инициализация по методу Glorot с равномерным распределением.
 
     Args:
-        shape (tuple): Форма массива весов.
+        shape (Tuple[int, ...]): Форма выходного массива.
+
+    Returns:
+        np.ndarray: Инициализированный массив.
+    """
+    fan_in, fan_out = _glorot_fan(shape)
+    s = np.sqrt(6.0 / (fan_in + fan_out))
+    return uniform(shape, scale=s)
+
+
+def he_normal(shape: Tuple[int, ...], **kwargs) -> np.ndarray:
+    """
+    Инициализация по методу He с нормальным распределением.
+
+    Args:
+        shape (Tuple[int, ...]): Форма выходного массива.
 
     Returns:
         np.ndarray: Инициализированный массив.
     """
     fan_in, _ = _glorot_fan(shape)
-    std = np.sqrt(2.0 / fan_in)
-    return normal(shape, mean=0.0, std=std)
+    s = np.sqrt(2.0 / fan_in)
+    return normal(shape, scale=s)
 
 
-def he_uniform(shape):
+def he_uniform(shape: Tuple[int, ...], **kwargs) -> np.ndarray:
     """
-    He инициализация из равномерного распределения.
+    Инициализация по методу He с равномерным распределением.
 
     Args:
-        shape (tuple): Форма массива весов.
+        shape (Tuple[int, ...]): Форма выходного массива.
 
     Returns:
         np.ndarray: Инициализированный массив.
     """
     fan_in, _ = _glorot_fan(shape)
-    limit = np.sqrt(6.0 / fan_in)
-    return uniform(shape, low=-limit, high=limit)
+    s = np.sqrt(6.0 / fan_in)
+    return uniform(shape, scale=s)
 
 
-def get_initializer(name):
+def get_initializer(name: str) -> Callable:
     """
     Возвращает функцию инициализации по её имени.
 
     Args:
-        name (str): Название функции инициализации.
+        name (str): Имя функции инициализации.
 
     Returns:
-        function: Функция инициализации.
+        Callable: Функция инициализации.
 
     Raises:
-        ValueError: Если передано неизвестное имя.
+        ValueError: Если функция инициализации не найдена.
     """
     initializers = {
-        'normal': normal,
-        'uniform': uniform,
-        'zero': zero,
-        'one': one,
-        'orthogonal': orthogonal,
-        'glorot_normal': glorot_normal,
-        'glorot_uniform': glorot_uniform,
-        'he_normal': he_normal,
-        'he_uniform': he_uniform
+        "normal": normal,
+        "uniform": uniform,
+        "zero": zero,
+        "one": one,
+        "orthogonal": orthogonal,
+        "glorot_normal": glorot_normal,
+        "glorot_uniform": glorot_uniform,
+        "he_normal": he_normal,
+        "he_uniform": he_uniform,
     }
-
-    if name not in initializers:
-        raise ValueError(f"Неизвестный инициализатор: {name}")
-
-    return initializers[name]
+    if name in initializers:
+        return initializers[name]
+    raise ValueError(f"Invalid initialization function: {name}")

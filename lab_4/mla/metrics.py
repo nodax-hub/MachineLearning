@@ -1,249 +1,254 @@
+# coding:utf-8
+from typing import Callable
+
 import autograd.numpy as np
 
+EPS = 1e-15
 
-def unhot(func):
+
+def unhot(function: Callable) -> Callable:
     """
-    Декоратор для преобразования one-hot представления в метки перед вычислением метрик.
+    Декоратор для преобразования one-hot представления в одномерный массив.
 
     Args:
-        func (function): Функция метрики.
+        function (Callable): Функция метрики, принимающая одномерные массивы.
 
     Returns:
-        function: Обновлённая функция, обрабатывающая one-hot входы.
+        Callable: Обёрнутая функция, работающая с one-hot представлением.
     """
-
-    def wrapper(y_true, y_pred, *args, **kwargs):
-        if y_true.ndim > 1:  # Если y_true в one-hot формате
-            y_true = np.argmax(y_true, axis=1)
-        if y_pred.ndim > 1:  # Если y_pred в one-hot формате
-            y_pred = np.argmax(y_pred, axis=1)
-        return func(y_true, y_pred, *args, **kwargs)
-
+    
+    def wrapper(actual: np.ndarray, predicted: np.ndarray):
+        if len(actual.shape) > 1 and actual.shape[1] > 1:
+            actual = actual.argmax(axis=1)
+        if len(predicted.shape) > 1 and predicted.shape[1] > 1:
+            predicted = predicted.argmax(axis=1)
+        return function(actual, predicted)
+    
     return wrapper
 
 
-def unhot_conversion(y):
+def absolute_error(actual: np.ndarray, predicted: np.ndarray) -> np.ndarray:
     """
-    Преобразует one-hot представление в столбец с метками.
+    Вычисляет абсолютную ошибку между предсказаниями и истинными значениями.
 
     Args:
-        y (np.ndarray): One-hot представление.
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные значения.
 
     Returns:
-        np.ndarray: Вектор меток.
+        np.ndarray: Абсолютные ошибки для каждого элемента.
     """
-    return np.argmax(y, axis=1)
-
-
-def absolute_error(y_true, y_pred):
-    """
-    Вычисляет абсолютную ошибку.
-
-    Args:
-        y_true (np.ndarray): Истинные значения.
-        y_pred (np.ndarray): Предсказанные значения.
-
-    Returns:
-        np.ndarray: Абсолютная ошибка.
-    """
-    return np.abs(y_true - y_pred)
+    return np.abs(actual - predicted)
 
 
 @unhot
-def classification_error(y_true, y_pred):
+def classification_error(actual: np.ndarray, predicted: np.ndarray) -> float:
     """
-    Вычисляет ошибку классификации.
+    Вычисляет долю ошибок классификации.
 
     Args:
-        y_true (np.ndarray): Истинные метки.
-        y_pred (np.ndarray): Предсказанные метки.
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные значения.
 
     Returns:
         float: Доля неправильных предсказаний.
     """
-    return np.mean(y_true != y_pred)
+    return (actual != predicted).sum() / float(actual.shape[0])
 
 
 @unhot
-def accuracy(y_true, y_pred):
+def accuracy(actual: np.ndarray, predicted: np.ndarray) -> float:
     """
     Вычисляет точность классификации.
 
     Args:
-        y_true (np.ndarray): Истинные метки.
-        y_pred (np.ndarray): Предсказанные метки.
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные значения.
 
     Returns:
         float: Доля правильных предсказаний.
     """
-    return np.mean(y_true == y_pred)
+    return 1.0 - classification_error(actual, predicted)
 
 
-def mean_absolute_error(y_true, y_pred):
+def mean_absolute_error(actual: np.ndarray, predicted: np.ndarray) -> float:
     """
     Вычисляет среднюю абсолютную ошибку (MAE).
 
     Args:
-        y_true (np.ndarray): Истинные значения.
-        y_pred (np.ndarray): Предсказанные значения.
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные значения.
 
     Returns:
         float: Средняя абсолютная ошибка.
     """
-    return np.mean(absolute_error(y_true, y_pred))
+    return np.mean(absolute_error(actual, predicted))
 
 
-def squared_error(y_true, y_pred):
+def squared_error(actual: np.ndarray, predicted: np.ndarray) -> np.ndarray:
     """
-    Вычисляет квадратичную ошибку.
+    Вычисляет квадратичную ошибку для каждого элемента.
 
     Args:
-        y_true (np.ndarray): Истинные значения.
-        y_pred (np.ndarray): Предсказанные значения.
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные значения.
 
     Returns:
-        np.ndarray: Квадратичная ошибка.
+        np.ndarray: Квадратичные ошибки.
     """
-    return (y_true - y_pred) ** 2
+    return (actual - predicted) ** 2
 
 
-def mean_squared_error(y_true, y_pred):
+def squared_log_error(actual: np.ndarray, predicted: np.ndarray) -> np.ndarray:
     """
-    Вычисляет среднюю квадратичную ошибку (MSE).
+    Вычисляет квадратичную логарифмическую ошибку для каждого элемента.
 
     Args:
-        y_true (np.ndarray): Истинные значения.
-        y_pred (np.ndarray): Предсказанные значения.
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные значения.
 
     Returns:
-        float: Средняя квадратичная ошибка.
+        np.ndarray: Квадратичные логарифмические ошибки.
     """
-    return np.mean(squared_error(y_true, y_pred))
+    return (np.log(np.array(actual) + 1) - np.log(np.array(predicted) + 1)) ** 2
 
 
-def root_mean_squared_error(y_true, y_pred):
-    """
-    Вычисляет среднекорневую квадратичную ошибку (RMSE).
-
-    Args:
-        y_true (np.ndarray): Истинные значения.
-        y_pred (np.ndarray): Предсказанные значения.
-
-    Returns:
-        float: RMSE.
-    """
-    return np.sqrt(mean_squared_error(y_true, y_pred))
-
-
-def mean_squared_log_error(y_true, y_pred):
+def mean_squared_log_error(actual: np.ndarray, predicted: np.ndarray) -> float:
     """
     Вычисляет среднюю квадратичную логарифмическую ошибку (MSLE).
 
     Args:
-        y_true (np.ndarray): Истинные значения.
-        y_pred (np.ndarray): Предсказанные значения.
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные значения.
 
     Returns:
-        float: MSLE.
+        float: Средняя квадратичная логарифмическая ошибка.
     """
-    return np.mean((np.log1p(y_true) - np.log1p(y_pred)) ** 2)
+    return np.mean(squared_log_error(actual, predicted))
 
 
-def root_mean_squared_log_error(y_true, y_pred):
+def mean_squared_error(actual: np.ndarray, predicted: np.ndarray) -> float:
     """
-    Вычисляет среднекорневую квадратичную логарифмическую ошибку (RMSLE).
+    Вычисляет среднюю квадратичную ошибку (MSE).
 
     Args:
-        y_true (np.ndarray): Истинные значения.
-        y_pred (np.ndarray): Предсказанные значения.
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные значения.
 
     Returns:
-        float: RMSLE.
+        float: Средняя квадратичная ошибка.
     """
-    return np.sqrt(mean_squared_log_error(y_true, y_pred))
+    return np.mean(squared_error(actual, predicted))
 
 
-def logloss(y_true, y_pred):
+def root_mean_squared_error(actual: np.ndarray, predicted: np.ndarray) -> float:
     """
-    Логистическая функция потерь (Log Loss).
+    Вычисляет корень из средней квадратичной ошибки (RMSE).
 
     Args:
-        y_true (np.ndarray): Истинные значения.
-        y_pred (np.ndarray): Предсказанные вероятности.
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные значения.
 
     Returns:
-        float: Log Loss.
+        float: Корень из средней квадратичной ошибки.
     """
-    epsilon = 1e-15
-    y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
-    return -np.mean(y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred))
+    return np.sqrt(mean_squared_error(actual, predicted))
 
 
-def hinge(y_true, y_pred):
+def root_mean_squared_log_error(actual: np.ndarray, predicted: np.ndarray) -> float:
     """
-    Hinge loss для задач бинарной классификации.
+    Вычисляет корень из средней квадратичной логарифмической ошибки (RMSLE).
 
     Args:
-        y_true (np.ndarray): Истинные метки (-1 или 1).
-        y_pred (np.ndarray): Предсказанные значения.
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные значения.
 
     Returns:
-        float: Значение Hinge loss.
+        float: Корень из средней квадратичной логарифмической ошибки.
     """
-    return np.mean(np.maximum(0, 1 - y_true * y_pred))
+    return np.sqrt(mean_squared_log_error(actual, predicted))
 
 
-def binary_crossentropy(y_true, y_pred):
+def logloss(actual: np.ndarray, predicted: np.ndarray) -> float:
     """
-    Бинарная кросс-энтропия.
+    Вычисляет логарифмическую функцию потерь (Log Loss).
 
     Args:
-        y_true (np.ndarray): Истинные метки.
-        y_pred (np.ndarray): Предсказанные вероятности.
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные вероятности.
 
     Returns:
-        float: Значение бинарной кросс-энтропии.
+        float: Логарифмическая функция потерь.
     """
-    return logloss(y_true, y_pred)
+    predicted = np.clip(predicted, EPS, 1 - EPS)
+    loss = -np.sum(actual * np.log(predicted))
+    return loss / float(actual.shape[0])
 
 
-# Aliases
+def hinge(actual: np.ndarray, predicted: np.ndarray) -> float:
+    """
+    Вычисляет функцию потерь Хинжа.
+
+    Args:
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные значения.
+
+    Returns:
+        float: Функция потерь Хинжа.
+    """
+    return np.mean(np.maximum(1.0 - actual * predicted, 0.0))
+
+
+def binary_crossentropy(actual: np.ndarray, predicted: np.ndarray) -> float:
+    """
+    Вычисляет бинарную кроссэнтропию.
+
+    Args:
+        actual (np.ndarray): Истинные значения.
+        predicted (np.ndarray): Предсказанные вероятности.
+
+    Returns:
+        float: Бинарная кроссэнтропия.
+    """
+    predicted = np.clip(predicted, EPS, 1 - EPS)
+    return np.mean(-np.sum(actual * np.log(predicted) + (1 - actual) * np.log(1 - predicted)))
+
+
+# aliases
 mse = mean_squared_error
 rmse = root_mean_squared_error
 mae = mean_absolute_error
 
 
-def get_metric(name):
+def get_metric(name: str) -> Callable:
     """
     Возвращает функцию метрики по её имени.
 
     Args:
-        name (str): Название метрики.
+        name (str): Имя функции метрики.
 
     Returns:
-        function: Функция метрики.
+        Callable: Функция метрики.
 
     Raises:
         ValueError: Если метрика с таким именем не найдена.
     """
     metrics = {
-        'absolute_error': absolute_error,
-        'classification_error': classification_error,
-        'accuracy': accuracy,
-        'mean_absolute_error': mean_absolute_error,
-        'mean_squared_error': mean_squared_error,
-        'root_mean_squared_error': root_mean_squared_error,
-        'mean_squared_log_error': mean_squared_log_error,
-        'root_mean_squared_log_error': root_mean_squared_log_error,
-        'logloss': logloss,
-        'hinge': hinge,
-        'binary_crossentropy': binary_crossentropy,
-        'mse': mse,
-        'rmse': rmse,
-        'mae': mae,
+        "absolute_error": absolute_error,
+        "classification_error": classification_error,
+        "accuracy": accuracy,
+        "mean_absolute_error": mean_absolute_error,
+        "mean_squared_error": mean_squared_error,
+        "root_mean_squared_error": root_mean_squared_error,
+        "mean_squared_log_error": mean_squared_log_error,
+        "root_mean_squared_log_error": root_mean_squared_log_error,
+        "logloss": logloss,
+        "hinge": hinge,
+        "binary_crossentropy": binary_crossentropy,
+        "mse": mse,
+        "rmse": rmse,
+        "mae": mae,
     }
-
-    if name not in metrics:
-        raise ValueError(f"Неизвестная метрика: {name}")
-
-    return metrics[name]
+    if name in metrics:
+        return metrics[name]
+    raise ValueError(f"Invalid metric function: {name}")

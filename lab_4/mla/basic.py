@@ -1,3 +1,7 @@
+# coding:utf-8
+from abc import ABC, abstractmethod
+from typing import Optional, Tuple
+
 import autograd.numpy as np
 from autograd import elementwise_grad
 
@@ -7,259 +11,251 @@ from .parameters import Parameters
 np.random.seed(9999)
 
 
-class Layer:
+class Layer(ABC):
     """
-    Базовый класс для всех слоёв.
+    Абстрактный базовый класс для всех слоев нейронной сети.
     """
-
-    def setup(self, input_dim):
+    
+    @abstractmethod
+    def setup(self, X_shape: Tuple[int, ...]) -> None:
         """
-        Инициализирует параметры слоя.
+        Инициализация параметров слоя.
 
         Args:
-            input_dim (int): Размер входных данных.
+            X_shape (Tuple[int, ...]): Форма входного тензора.
         """
         pass
-
-    def forward_pass(self, inputs):
+    
+    @abstractmethod
+    def forward_pass(self, X: np.ndarray) -> np.ndarray:
         """
         Прямой проход через слой.
 
         Args:
-            inputs (np.ndarray): Входные данные.
+            X (np.ndarray): Входные данные.
 
         Returns:
-            np.ndarray: Выход слоя.
+            np.ndarray: Результат прямого прохода.
         """
-        raise NotImplementedError
-
-    def backward_pass(self, grads):
+        pass
+    
+    @abstractmethod
+    def backward_pass(self, delta: np.ndarray) -> np.ndarray:
         """
         Обратный проход через слой.
 
         Args:
-            grads (np.ndarray): Градиенты на входе.
+            delta (np.ndarray): Градиенты от следующего слоя.
 
         Returns:
-            np.ndarray: Градиенты на выходе.
+            np.ndarray: Градиенты для предыдущего слоя.
         """
-        raise NotImplementedError
+        pass
+    
+    @abstractmethod
+    def shape(self, x_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        """
+        Возвращает форму выхода слоя.
 
-    def shape(self):
-        """Возвращает форму текущего слоя."""
-        raise NotImplementedError
+        Args:
+            x_shape (Tuple[int, ...]): Форма входных данных.
+
+        Returns:
+            Tuple[int, ...]: Форма выходных данных.
+        """
+        pass
 
 
 class ParamMixin:
     """
-    Миксин для доступа к параметрам слоя.
+    Миксин для работы с параметрами слоя.
     """
-
+    
     @property
-    def parameters(self):
-        """Возвращает параметры слоя."""
-        return self._parameters
+    def parameters(self) -> Parameters:
+        return self._params
 
 
 class PhaseMixin:
     """
-    Миксин для управления фазами обучения и тестирования.
+    Миксин для переключения между режимами обучения и тестирования.
     """
-
-    def __init__(self):
-        self._is_training = True
-
+    
+    _train: bool = False
+    
     @property
-    def is_training(self):
-        return self._is_training
-
+    def is_training(self) -> bool:
+        return self._train
+    
     @is_training.setter
-    def is_training(self, value):
-        self._is_training = value
-
+    def is_training(self, is_train: bool = True) -> None:
+        self._train = is_train
+    
     @property
-    def is_testing(self):
-        return not self._is_training
-
+    def is_testing(self) -> bool:
+        return not self._train
+    
     @is_testing.setter
-    def is_testing(self, value):
-        self._is_training = not value
+    def is_testing(self, is_test: bool = True) -> None:
+        self._train = not is_test
 
 
 class Dense(Layer, ParamMixin):
     """
-    Полносвязный слой (Dense).
-
-    Args:
-        output_dim (int): Количество выходных нейронов.
-        parameters (Parameters): Параметры слоя.
+    Полносвязный слой.
     """
-
-    def __init__(self, output_dim, parameters=None):
+    
+    def __init__(self, output_dim: int, parameters: Optional[Parameters] = None):
+        """
+        Args:
+            output_dim (int): Размер выходного слоя.
+            parameters (Optional[Parameters]): Параметры слоя. Если None, создаются новые.
+        """
         self.output_dim = output_dim
-        self.activation_name = None
-        self.activation = None
-        self._parameters = None
-        self.input_dim = None
-        self._inputs = None
-
-        if self._parameters is None:
-            self._parameters = Parameters()
-
-        elif isinstance(parameters, Parameters):
-            self._parameters = parameters
-
-        else:
-            raise TypeError('Parameters must be a Parameters object.')
-
-    def setup(self, input_dim):
-        """
-        Инициализирует параметры слоя.
-
-        Args:
-            input_dim (int): Количество входных нейронов.
-        """
-        self.input_dim = input_dim
-        self._parameters.setup_weights({'W': (input_dim, self.output_dim), 'b': (self.output_dim,)})
-
-    def forward_pass(self, inputs):
-        """
-        Прямой проход через Dense слой.
-
-        Args:
-            inputs (np.ndarray): Входные данные.
-
-        Returns:
-            np.ndarray: Выходные данные.
-        """
-        self._inputs = inputs
-        W, b = self.parameters['W'], self.parameters['b']
-        output = np.dot(inputs, W) + b
-        return self.activation(output) if self.activation else output
-
-    def backward_pass(self, grads):
-        """
-        Обратный проход через Dense слой.
-
-        Args:
-            grads (np.ndarray): Градиенты на выходе.
-
-        Returns:
-            np.ndarray: Градиенты на входе.
-        """
-        W = self.parameters['W']
-        dW = np.dot(self._inputs.T, grads)
-        db = np.sum(grads, axis=0)
-        dinputs = np.dot(grads, W.T)
-
-        self.parameters.update_grad('W', dW)
-        self.parameters.update_grad('b', db)
-        return dinputs
-
-    def shape(self):
-        return (self.input_dim, self.output_dim)
+        self._params = parameters or Parameters()
+        self.last_input = None
+    
+    def setup(self, x_shape: Tuple[int, ...]) -> None:
+        self._params.setup_weights((x_shape[1], self.output_dim))
+    
+    def forward_pass(self, X: np.ndarray) -> np.ndarray:
+        self.last_input = X
+        return self.weight(X)
+    
+    def weight(self, X: np.ndarray) -> np.ndarray:
+        W = np.dot(X, self._params["W"])
+        return W + self._params["b"]
+    
+    def backward_pass(self, delta: np.ndarray) -> np.ndarray:
+        dW = np.dot(self.last_input.T, delta)
+        db = np.sum(delta, axis=0)
+        
+        self._params.update_grad("W", dW)
+        self._params.update_grad("b", db)
+        return np.dot(delta, self._params["W"].T)
+    
+    def shape(self, x_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        return x_shape[0], self.output_dim
 
 
 class Activation(Layer):
     """
     Слой активации.
-
-    Args:
-        activation (str): Название функции активации.
     """
-
-    def __init__(self, activation):
-        self.activation_name = activation
-        self.activation = get_activation(activation)
-        self._inputs = None
-
-    def forward_pass(self, inputs):
-        self._inputs = inputs
-        return self.activation(inputs)
-
-    def backward_pass(self, grads):
-        return grads * elementwise_grad(self.activation)(self._inputs)
-
-    def shape(self):
-        return None
+    
+    def setup(self, X_shape: Tuple[int, ...]) -> None:
+        pass
+    
+    def __init__(self, name: str):
+        """
+        Args:
+            name (str): Имя функции активации.
+        """
+        self.last_input = None
+        self.activation = get_activation(name)
+        self.activation_d = elementwise_grad(self.activation)
+    
+    def forward_pass(self, X: np.ndarray) -> np.ndarray:
+        self.last_input = X
+        return self.activation(X)
+    
+    def backward_pass(self, delta: np.ndarray) -> np.ndarray:
+        return self.activation_d(self.last_input) * delta
+    
+    def shape(self, x_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        return x_shape
 
 
 class Dropout(Layer, PhaseMixin):
     """
-    Слой Dropout для регуляризации.
-
-    Args:
-        p (float): Вероятность зануления нейрона.
+    Dropout слой. Зануляет часть входов во время обучения.
     """
-
-    def __init__(self, p=0.5):
-        super().__init__()
+    
+    def setup(self, X_shape: Tuple[int, ...]) -> None:
+        pass
+    
+    def __init__(self, p: float = 0.1):
+        """
+        Args:
+            p (float): Вероятность зануления входов.
+        """
         self.p = p
         self._mask = None
-
-    def forward_pass(self, inputs):
+    
+    def forward_pass(self, X: np.ndarray) -> np.ndarray:
+        assert self.p > 0, "Вероятность p должна быть больше 0."
         if self.is_training:
-            self._mask = np.random.binomial(1, 1 - self.p, size=inputs.shape) / (1 - self.p)
-            return inputs * self._mask
-        return inputs
-
-    def backward_pass(self, grads):
-        return grads * self._mask if self.is_training else grads
-
-    def shape(self):
-        return None
+            self._mask = np.random.uniform(size=X.shape) > self.p
+            return X * self._mask
+        return X * (1.0 - self.p)
+    
+    def backward_pass(self, delta: np.ndarray) -> np.ndarray:
+        return delta * self._mask
+    
+    def shape(self, x_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        return x_shape
 
 
 class TimeStepSlicer(Layer):
     """
-    Слой для выбора определённого временного шага из 3D тензора.
-
-    Args:
-        step (int): Индекс временного шага.
+    Извлекает заданный временной шаг из 3D тензора.
     """
-
-    def __init__(self, step):
+    
+    def setup(self, X_shape: Tuple[int, ...]) -> None:
+        pass
+    
+    def __init__(self, step: int = -1):
+        """
+        Args:
+            step (int): Индекс временного шага.
+        """
         self.step = step
-
-    def forward_pass(self, inputs):
-        return inputs[:, self.step, :]
-
-    def backward_pass(self, grads):
-        dinputs = np.zeros_like(grads)
-        dinputs[:, self.step, :] = grads
-        return dinputs
-
-    def shape(self):
-        return None
+    
+    def forward_pass(self, X: np.ndarray) -> np.ndarray:
+        return X[:, self.step, :]
+    
+    def backward_pass(self, delta: np.ndarray) -> np.ndarray:
+        return np.repeat(delta[:, np.newaxis, :], 2, axis=1)
+    
+    def shape(self, x_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        return x_shape[0], x_shape[2]
 
 
 class TimeDistributedDense(Layer):
     """
-    Применяет Dense слой к каждому временному шагу тензора.
-
-    Args:
-        output_dim (int): Количество выходных нейронов.
+    Применяет Dense слой ко всем временным шагам.
     """
-
-    def __init__(self, output_dim):
-        self.dense = Dense(output_dim)
-
-    def setup(self, input_dim):
-        self.dense.setup(input_dim)
-
-    def forward_pass(self, inputs):
-        time_steps = inputs.shape[1]
-        outputs = [self.dense.forward_pass(inputs[:, t, :]) for t in range(time_steps)]
-        return np.stack(outputs, axis=1)
-
-    def backward_pass(self, grads):
-        time_steps = grads.shape[1]
-        dinputs = [self.dense.backward_pass(grads[:, t, :]) for t in range(time_steps)]
-        return np.stack(dinputs, axis=1)
-
+    
+    def __init__(self, output_dim: int):
+        """
+        Args:
+            output_dim (int): Размер выходного слоя.
+        """
+        self.output_dim = output_dim
+        self.n_timesteps = None
+        self.dense = None
+        self.input_dim = None
+    
+    def setup(self, X_shape: Tuple[int, ...]) -> None:
+        self.dense = Dense(self.output_dim)
+        self.dense.setup((X_shape[0], X_shape[2]))
+        self.input_dim = X_shape[2]
+    
+    def forward_pass(self, X: np.ndarray) -> np.ndarray:
+        n_timesteps = X.shape[1]
+        X = X.reshape(-1, X.shape[-1])
+        y = self.dense.forward_pass(X)
+        return y.reshape((-1, n_timesteps, self.output_dim))
+    
+    def backward_pass(self, delta: np.ndarray) -> np.ndarray:
+        n_timesteps = delta.shape[1]
+        X = delta.reshape(-1, delta.shape[-1])
+        y = self.dense.backward_pass(X)
+        return y.reshape((-1, n_timesteps, self.input_dim))
+    
     @property
-    def parameters(self):
+    def parameters(self) -> Parameters:
         return self.dense.parameters
-
-    def shape(self):
-        return self.dense.shape()
+    
+    def shape(self, x_shape: Tuple[int, ...]) -> Tuple[int, ...]:
+        return x_shape[0], x_shape[1], self.output_dim

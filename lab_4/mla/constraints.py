@@ -1,117 +1,81 @@
+# coding:utf-8
+from abc import ABC, abstractmethod
+
 import numpy as np
 
+EPSILON = 1e-8
 
-class Constraint:
-    """
-    Базовый класс для ограничений на параметры модели.
-    """
 
-    def clip(self, weights):
+class Constraint(ABC):
+    """
+    Абстрактный базовый класс для всех ограничений на веса.
+    """
+    
+    @abstractmethod
+    def clip(self, p: np.ndarray) -> np.ndarray:
         """
-        Применяет ограничение к весам.
+        Применяет ограничение к заданному массиву весов.
 
         Args:
-            weights (np.ndarray): Массив весов.
+            p (np.ndarray): Массив весов.
 
         Returns:
-            np.ndarray: Ограниченные веса.
+            np.ndarray: Изменённый массив весов после применения ограничения.
         """
-        raise NotImplementedError("Метод 'clip' должен быть переопределён в подклассах.")
+        pass
 
 
 class MaxNorm(Constraint):
     """
-    Ограничение максимальной нормы весов.
-
-    Args:
-        max_value (float): Максимальное значение нормы.
-        axis (int): Ось, вдоль которой вычисляется норма.
+    Ограничение нормы по максимальному значению.
     """
-
-    def __init__(self, max_value=2.0, axis=0):
-        self.max_value = max_value
-        self.axis = axis
-
-    def clip(self, weights):
+    
+    def __init__(self, m: float = 2.0, axis: int = 0):
         """
-        Ограничивает норму весов до max_value.
-
         Args:
-            weights (np.ndarray): Массив весов.
-
-        Returns:
-            np.ndarray: Весы с ограниченной нормой.
+            m (float): Максимальная допустимая норма.
+            axis (int): Ось, вдоль которой рассчитывается норма.
         """
-        norms = np.linalg.norm(weights, axis=self.axis, keepdims=True)
-        desired = np.clip(norms, 0, self.max_value)
-        return weights * (desired / (norms + 1e-8))
+        self.axis = axis
+        self.m = m
+    
+    def clip(self, p: np.ndarray) -> np.ndarray:
+        norms = np.sqrt(np.sum(p ** 2, axis=self.axis, keepdims=True))
+        desired = np.clip(norms, 0, self.m)
+        return p * (desired / (EPSILON + norms))
 
 
 class NonNeg(Constraint):
     """
-    Ограничение, запрещающее отрицательные значения весов.
+    Ограничение для обеспечения неотрицательности весов.
     """
-
-    def clip(self, weights):
-        """
-        Заменяет отрицательные значения на ноль.
-
-        Args:
-            weights (np.ndarray): Массив весов.
-
-        Returns:
-            np.ndarray: Весы, содержащие только неотрицательные значения.
-        """
-        return np.maximum(0, weights)
+    
+    def clip(self, p: np.ndarray) -> np.ndarray:
+        p = np.maximum(p, 0.0)
+        return p
 
 
 class SmallNorm(Constraint):
     """
-    Ограничение нормы весов до небольшого значения.
-
-    Args:
-        max_value (float): Максимальное значение нормы.
+    Ограничение для обрезки норм весов в пределах [-5, 5].
     """
-
-    def __init__(self, max_value=1.0):
-        self.max_value = max_value
-
-    def clip(self, weights):
-        """
-        Ограничивает норму весов до small_value.
-
-        Args:
-            weights (np.ndarray): Массив весов.
-
-        Returns:
-            np.ndarray: Ограниченные веса.
-        """
-        norm = np.linalg.norm(weights)
-        if norm > self.max_value:
-            return weights * (self.max_value / (norm + 1e-8))
-        return weights
+    
+    def clip(self, p: np.ndarray) -> np.ndarray:
+        return np.clip(p, -5, 5)
 
 
 class UnitNorm(Constraint):
     """
-    Ограничение, приводящее веса к единичной норме.
-
-    Args:
-        axis (int): Ось, вдоль которой нормируются веса.
+    Ограничение для нормализации весов до единичной нормы.
     """
-
-    def __init__(self, axis=0):
-        self.axis = axis
-
-    def clip(self, weights):
+    
+    def __init__(self, axis: int = 0):
         """
-        Приводит веса к единичной норме.
-
         Args:
-            weights (np.ndarray): Массив весов.
-
-        Returns:
-            np.ndarray: Нормализованные веса.
+            axis (int): Ось, вдоль которой нормализуются веса.
         """
-        norms = np.linalg.norm(weights, axis=self.axis, keepdims=True)
-        return weights / (norms + 1e-8)
+        self.axis = axis
+    
+    def clip(self, p: np.ndarray) -> np.ndarray:
+        norms = np.sqrt(np.sum(p ** 2, axis=self.axis, keepdims=True))
+        return p / (EPSILON + norms)

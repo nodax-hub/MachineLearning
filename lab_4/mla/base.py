@@ -1,99 +1,104 @@
-from typing import Self
+# coding:utf-8
+from abc import ABC, abstractmethod
 
 import numpy as np
-from abc import ABC, abstractmethod
+
 
 class BaseEstimator(ABC):
     """
-    Базовый класс для построения оценщиков (estimators).
+    Базовый класс для построения оценщиков.
 
     Attributes:
-        y_required (bool): Требуется ли наличие целевых значений (y).
-        fit_required (bool): Требуется ли обучение перед предсказанием.
-        is_fitted (bool): Флаг, указывающий, обучена ли модель.
+        y_required (bool): Указывает, требуется ли массив y.
+        fit_required (bool): Указывает, требуется ли вызов fit перед predict.
+        X (ndarray): Входной набор данных после обработки.
+        y (ndarray): Целевые значения после обработки.
+        n_samples (int): Число образцов в X.
+        n_features (int): Число признаков в X.
     """
-    y_required = True  # Указывает, что y (целевые значения) обязательны
-    fit_required = True  # Указывает, что модель должна быть обучена перед предсказанием
-
-    def __init__(self):
-        """
-        Инициализация базового оценщика.
-
-        Устанавливает флаг `is_fitted` в значение False.
-        """
-        self.is_fitted = False  # Флаг, что модель не обучена
-
+    
+    y_required = True
+    fit_required = True
+    
     def _setup_input(self, X, y=None):
         """
-        Преобразует входные данные в формат numpy.ndarray и проверяет их корректность.
+        Проверяет и подготавливает входные данные для оценщика.
 
-        Если y обязателен (y_required=True), метод проверяет его наличие и длину относительно X.
+        Преобразует X и y в numpy массивы, если это необходимо, и проверяет
+        корректность их размеров. Определяет количество образцов и признаков в X.
 
         Args:
-            X (array-like): Матрица признаков (фичей).
-            y (array-like, optional): Целевые значения. Обязательно, если y_required=True.
-
-        Returns:
-            tuple: Кортеж из (X, y), где оба значения приведены к формату numpy.ndarray.
+            X (array-like): Набор признаков.
+            y (array-like, optional): Целевые значения. Требуется, если y_required=True.
 
         Raises:
-            ValueError: Если y обязателен, но не предоставлен, или если длины X и y не совпадают.
+            ValueError: Если X или y пусты или отсутствует обязательный y.
         """
-        X = np.asarray(X)
-
+        if not isinstance(X, np.ndarray):
+            X = np.array(X)
+        
+        if X.size == 0:
+            raise ValueError("Получена пустая матрица.")
+        
+        if X.ndim == 1:
+            self.n_samples, self.n_features = 1, X.size
+        else:
+            self.n_samples, self.n_features = X.shape[0], np.prod(X.shape[1:])
+        
+        self.X = X
+        
         if self.y_required:
             if y is None:
-                raise ValueError("y обязателен, но не предоставлен.")
-            y = np.asarray(y)
-
-            if len(X) != len(y):
-                raise ValueError("Длины X и y должны совпадать.")
-
-        return X, y
-
-    @abstractmethod
-    def fit(self, X, y=None) -> Self:
+                raise ValueError("Отсутствует обязательный аргумент y.")
+            
+            if not isinstance(y, np.ndarray):
+                y = np.array(y)
+            
+            if y.size == 0:
+                raise ValueError("Массив целевых значений должен быть непустым.")
+        
+        self.y = y
+    
+    def fit(self, X, y=None):
         """
-        Обучает модель на основе предоставленных данных.
+        Выполняет подготовку входных данных.
 
         Args:
-            X (array-like): Матрица признаков (фичей).
-            y (array-like, optional): Целевые значения. Обязательно, если y_required=True.
-
-        Returns:
-            Self: Возвращает текущий экземпляр модели.
+            X (array-like): Набор признаков.
+            y (array-like, optional): Целевые значения.
         """
-        X, y = self._setup_input(X, y)
-        self.is_fitted = True
-        return self
-
-    def predict(self, X):
+        self._setup_input(X, y)
+    
+    def predict(self, X=None):
         """
-        Предсказывает значения на основе обученной модели.
+        Возвращает предсказания для входных данных.
 
         Args:
-            X (array-like): Матрица признаков (фичей).
+            X (array-like, optional): Набор признаков для предсказания. Если None, используется X из fit.
 
         Returns:
-            array-like: Предсказанные значения.
+            ndarray: Предсказания для входных данных.
 
         Raises:
-            ValueError: Если модель не была обучена перед предсказанием.
+            ValueError: Если fit не был вызван, а fit_required=True.
         """
-        if self.fit_required and not self.is_fitted:
-            raise ValueError("Модель должна быть обучена перед выполнением предсказаний.")
-
-        return self._predict(X)
-
+        if X is not None and not isinstance(X, np.ndarray):
+            X = np.array(X)
+        
+        if self.X is not None or not self.fit_required:
+            return self._predict(X)
+        else:
+            raise ValueError("Необходимо вызвать `fit` перед `predict`.")
+    
     @abstractmethod
-    def _predict(self, X):
+    def _predict(self, X=None):
         """
-        Внутренний метод для реализации логики предсказаний.
+        Абстрактный метод для реализации предсказания в подклассах.
 
         Args:
-            X (array-like): Матрица признаков (фичей).
+            X (array-like, optional): Набор признаков для предсказания.
 
-        Returns:
-            array-like: Предсказанные значения.
+        Raises:
+            NotImplementedError: Если метод не реализован в подклассе.
         """
-    pass
+        pass

@@ -1,137 +1,136 @@
 import autograd.numpy as np
 
 
-def sigmoid(x):
+def sigmoid(z):
     """
-    Сигмоидная функция активации.
+    Сигмоидальная активационная функция.
 
     Args:
-        x (np.ndarray): Входные данные.
+        z (ndarray): Входные данные.
 
     Returns:
-        np.ndarray: Значения после применения сигмоиды.
+        ndarray: Выходные данные после применения сигмоида.
     """
-    return 1 / (1 + np.exp(-x))
+    return 1.0 / (1.0 + np.exp(-z))
 
 
-def softmax(x):
+def softmax(z):
     """
-    Функция активации Softmax, безопасная от числового переполнения.
+    Функция активации softmax для многоклассовой классификации.
 
     Args:
-        x (np.ndarray): Входные данные.
+        z (ndarray): Входные данные (2D массив).
 
     Returns:
-        np.ndarray: Вероятности для классов.
+        ndarray: Вероятности классов, нормализованные вдоль осей.
     """
-    exps = np.exp(x - np.max(x, axis=-1, keepdims=True))
-    return exps / np.sum(exps, axis=-1, keepdims=True)
+    # Избегаем численного переполнения, вычитая максимум из z
+    e = np.exp(z - np.amax(z, axis=1, keepdims=True))
+    return e / np.sum(e, axis=1, keepdims=True)
 
 
-def linear(x):
+def linear(z):
     """
-    Линейная функция активации (прямое пропускание).
+    Линейная активационная функция (возвращает входные данные без изменений).
 
     Args:
-        x (np.ndarray): Входные данные.
+        z (ndarray): Входные данные.
 
     Returns:
-        np.ndarray: Те же значения, что и на входе.
+        ndarray: Выходные данные без изменений.
     """
-    return x
+    return z
 
 
-def softplus(x):
+def softplus(z):
     """
-    Функция активации Softplus (сглаженная ReLU).
+    Гладкая версия функции ReLU (softplus).
 
     Args:
-        x (np.ndarray): Входные данные.
+        z (ndarray): Входные данные.
 
     Returns:
-        np.ndarray: Значения после применения Softplus.
+        ndarray: Выходные данные после применения softplus.
     """
-    return np.log(1 + np.exp(x))
+    return np.logaddexp(0.0, z)  # Избегаем переполнения
 
 
-def softsign(x):
+def softsign(z):
     """
-    Функция активации Softsign.
+    Функция активации softsign.
 
     Args:
-        x (np.ndarray): Входные данные.
+        z (ndarray): Входные данные.
 
     Returns:
-        np.ndarray: Значения после применения Softsign.
+        ndarray: Выходные данные после применения softsign.
     """
-    return x / (1 + np.abs(x))
+    return z / (1 + np.abs(z))
 
 
-def tanh(x):
+def tanh(z):
     """
-    Гиперболический тангенс.
+    Гиперболический тангенс (tanh).
 
     Args:
-        x (np.ndarray): Входные данные.
+        z (ndarray): Входные данные.
 
     Returns:
-        np.ndarray: Значения после применения tanh.
+        ndarray: Выходные данные после применения tanh.
     """
-    return np.tanh(x)
+    return np.tanh(z)
 
 
-def relu(x):
+def relu(z):
     """
     Функция активации ReLU (Rectified Linear Unit).
 
     Args:
-        x (np.ndarray): Входные данные.
+        z (ndarray): Входные данные.
 
     Returns:
-        np.ndarray: Значения после применения ReLU.
+        ndarray: Выходные данные после применения ReLU.
     """
-    return np.maximum(0, x)
+    return np.maximum(0, z)
 
 
-def leakyrelu(x, alpha=0.01):
+def leakyrelu(z, a=0.01):
     """
     Функция активации Leaky ReLU.
 
     Args:
-        x (np.ndarray): Входные данные.
-        alpha (float): Небольшой коэффициент для отрицательных значений.
+        z (ndarray): Входные данные.
+        a (float, optional): Коэффициент утечки для отрицательных значений. По умолчанию 0.01.
 
     Returns:
-        np.ndarray: Значения после применения Leaky ReLU.
+        ndarray: Выходные данные после применения Leaky ReLU.
     """
-    return np.where(x > 0, x, alpha * x)
+    return np.maximum(z * a, z)
 
 
 def get_activation(name):
     """
-    Возвращает функцию активации по её имени.
+    Возвращает активационную функцию по её имени.
 
     Args:
-        name (str): Название функции активации.
+        name (str): Имя функции активации.
 
     Returns:
-        function: Функция активации.
+        Callable: Соответствующая функция активации.
 
     Raises:
-        ValueError: Если передано неизвестное имя.
+        ValueError: Если имя функции активации некорректно.
     """
     activations = {
-        'sigmoid': sigmoid,
-        'softmax': softmax,
-        'linear': linear,
-        'softplus': softplus,
-        'softsign': softsign,
-        'tanh': tanh,
-        'relu': relu,
-        'leakyrelu': leakyrelu,
+        "sigmoid": sigmoid,
+        "softmax": softmax,
+        "linear": linear,
+        "softplus": softplus,
+        "softsign": softsign,
+        "tanh": tanh,
+        "relu": relu,
+        "leakyrelu": leakyrelu,
     }
-
-    if name not in activations:
-        raise ValueError(f"Неизвестная функция активации: {name}")
-
-    return activations[name]
+    if name in activations:
+        return activations[name]
+    raise ValueError(f"Invalid activation function: {name}")

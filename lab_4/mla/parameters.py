@@ -1,134 +1,143 @@
+# coding:utf-8
+from typing import Optional, Dict
+
 import numpy as np
+
 from .initializations import get_initializer
 
 
 class Parameters:
     """
-    Контейнер для параметров слоя нейронной сети.
+    Контейнер для параметров слоя.
 
-    Attributes:
-        init (str): Название функции инициализации весов.
-        scale (float): Масштабирующий коэффициент для инициализации весов.
-        bias (float): Начальное значение для смещений.
-        regularizers (dict): Регуляризаторы весов.
-        constraints (dict): Ограничения для весов.
-        weights (dict): Словарь текущих параметров.
-        grads (dict): Словарь градиентов для параметров.
+    Args:
+        init_name (str): Имя функции инициализации весов. По умолчанию 'glorot_uniform'.
+        scale (float): Масштабный коэффициент для инициализации весов.
+        bias (float): Начальные значения для смещений. По умолчанию 1.0.
+        regularizers (dict): Регуляризаторы для весов, например {'W': L2()}.
+        constraints (dict): Ограничения для весов, например {'b': MaxNorm()}.
     """
-
-    def __init__(self, init='glorot_uniform', scale=0.5, bias=1.0, regularizers=None, constraints=None):
-        """
-        Инициализация контейнера для параметров слоя.
-
-        Args:
-            init (str): Название функции инициализации весов.
-            scale (float): Масштабирующий коэффициент для инициализации.
-            bias (float): Начальное значение для смещений.
-            regularizers (dict, optional): Словарь регуляризаторов для весов.
-            constraints (dict, optional): Словарь ограничений для весов.
-        """
-        self.init = init
-        self.scale = scale
-        self.bias = bias
-        self.regularizers = regularizers if regularizers else {}
+    
+    def __init__(
+            self,
+            init_name: str = "glorot_uniform",
+            scale: float = 0.5,
+            bias: float = 1.0,
+            regularizers: Optional[Dict[str, object]] = None,
+            constraints: Optional[Dict[str, object]] = None,
+    ):
         self.constraints = constraints if constraints else {}
-
-        self.weights = {}
-        self.grads = {}
-        self._initialized = False
-
-    def setup_weights(self, shapes):
+        self.regularizers = regularizers if regularizers else {}
+        self.initial_bias = bias
+        self.scale = scale
+        self.init = get_initializer(init_name)
+        
+        self._params = {}
+        self._grads = {}
+    
+    def setup_weights(self, W_shape: tuple, b_shape: Optional[tuple] = None):
         """
-        Создаёт веса и смещения для слоя на основе их формы и выбранного инициализатора.
+        Инициализирует веса и смещения слоя.
 
         Args:
-            shapes (dict): Словарь с формами для весов и смещений. Пример:
-                {'W': (input_dim, output_dim), 'b': (output_dim,)}
+            W_shape (tuple): Форма весов W.
+            b_shape (Optional[tuple]): Форма смещений b. Если не указано, используется форма выходного слоя.
         """
-        initializer = get_initializer(self.init)
-        for name, shape in shapes.items():
-            if name == 'b':
-                self.weights[name] = np.full(shape, self.bias)  # Смещения
-            else:
-                self.weights[name] = initializer(shape) * self.scale
+        if "W" not in self._params:
+            self._params["W"] = self.init(shape=W_shape, scale=self.scale)
+            self._params["b"] = (
+                np.full(b_shape, self.initial_bias)
+                if b_shape is not None
+                else np.full(W_shape[1], self.initial_bias)
+            )
         self.init_grad()
-        self._initialized = True
-
+    
     def init_grad(self):
         """
-        Инициализирует массивы градиентов для каждого параметра.
+        Инициализирует массивы градиентов, соответствующих каждому массиву весов.
         """
-        for name, value in self.weights.items():
-            self.grads[name] = np.zeros_like(value)
-
-    def step(self, learning_rate=0.01):
+        for key in self._params.keys():
+            if key not in self._grads:
+                self._grads[key] = np.zeros_like(self._params[key])
+    
+    def step(self, name: str, step: np.ndarray):
         """
-        Выполняет шаг обновления параметров на основе градиентов.
-
-        Args:
-            learning_rate (float): Шаг обучения для обновления параметров.
-        """
-        for name in self.weights:
-            self.weights[name] -= learning_rate * self.grads[name]
-
-    def update_grad(self, name, grad):
-        """
-        Обновляет градиент для конкретного параметра.
+        Обновляет указанный вес на значение шага.
 
         Args:
-            name (str): Название параметра.
-            grad (np.ndarray): Значение градиента.
+            name (str): Имя параметра.
+            step (np.ndarray): Значение шага для обновления.
         """
-        if name in self.grads:
-            self.grads[name] += grad
+        self._params[name] += step
+        
+        if name in self.constraints:
+            self._params[name] = self.constraints[name].clip(self._params[name])
+    
+    def update_grad(self, name: str, value: np.ndarray):
+        """
+        Обновляет значение градиента для указанного параметра.
 
+        Args:
+            name (str): Имя параметра.
+            value (np.ndarray): Значение градиента.
+        """
+        self._grads[name] = value
+        
+        if name in self.regularizers:
+            self._grads[name] += self.regularizers[name](self._params[name])
+    
     @property
-    def n_params(self):
+    def n_params(self) -> int:
         """
-        Подсчитывает общее количество параметров в контейнере.
+        Возвращает количество параметров в слое.
 
         Returns:
-            int: Количество параметров.
+            int: Общее количество параметров.
         """
-        return sum(np.prod(w.shape) for w in self.weights.values())
-
+        return sum(np.prod(self._params[x].shape) for x in self._params.keys())
+    
     def keys(self):
         """
         Возвращает ключи параметров.
 
         Returns:
-            list: Список ключей параметров.
+            Iterable[str]: Ключи параметров.
         """
-        return list(self.weights.keys())
-
+        return self._params.keys()
+    
     @property
-    def grad(self):
+    def grad(self) -> Dict[str, np.ndarray]:
         """
-        Возвращает градиенты параметров.
+        Возвращает словарь с градиентами параметров.
 
         Returns:
-            dict: Словарь градиентов.
+            Dict[str, np.ndarray]: Градиенты параметров.
         """
-        return self.grads
-
-    def __getitem__(self, key):
+        return self._grads
+    
+    def __getitem__(self, item: str) -> np.ndarray:
         """
-        Позволяет получать доступ к параметрам через синтаксис словаря.
+        Доступ к параметру по имени.
 
         Args:
-            key (str): Название параметра.
+            item (str): Имя параметра.
 
         Returns:
-            np.ndarray: Параметр.
-        """
-        return self.weights[key]
+            np.ndarray: Значение параметра.
 
-    def __setitem__(self, key, value):
+        Raises:
+            ValueError: Если параметр не существует.
         """
-        Позволяет устанавливать параметры через синтаксис словаря.
+        if item in self._params:
+            return self._params[item]
+        raise ValueError(f"Parameter '{item}' not found.")
+    
+    def __setitem__(self, key: str, value: np.ndarray):
+        """
+        Устанавливает значение параметра.
 
         Args:
-            key (str): Название параметра.
-            value (np.ndarray): Новое значение параметра.
+            key (str): Имя параметра.
+            value (np.ndarray): Значение параметра.
         """
-        self.weights[key] = value
+        self._params[key] = value

@@ -3,238 +3,319 @@ import time
 from collections import defaultdict
 
 import numpy as np
-from tqdm import tqdm
+from tqdm.auto import tqdm
 
 from .utils import batch_iterator
 
 
 class Optimizer:
     """
-    Базовый класс для оптимизаторов.
+    Базовый класс для всех оптимизаторов.
     """
-
-    def __init__(self, learning_rate=0.01):
+    
+    def optimize(self, network):
         """
-        Инициализация оптимизатора.
+        Запускает процесс оптимизации сети.
 
         Args:
-            learning_rate (float): Шаг обучения.
-        """
-        self.learning_rate = learning_rate
-
-    def optimize(self, model, X, y, epochs=1, batch_size=32, shuffle=True):
-        """
-        Запускает процесс оптимизации модели.
-
-        Args:
-            model: Обучаемая модель.
-            X (array-like): Входные данные.
-            y (array-like): Целевые значения.
-            epochs (int): Количество эпох обучения.
-            batch_size (int): Размер батча.
-            shuffle (bool): Перемешивать ли данные перед каждой эпохой.
-        """
-        self.setup(model)
-        for epoch in range(epochs):
-            epoch_loss = self.train_epoch(model, X, y, batch_size, shuffle)
-            logging.info(f"Epoch {epoch + 1}/{epochs}, Loss: {epoch_loss:.4f}")
-
-    def update(self, params, grads):
-        """
-        Выполняет обновление параметров. Должно быть переопределено в подклассах.
-
-        Args:
-            params (dict): Словарь параметров модели.
-            grads (dict): Словарь градиентов параметров.
-        """
-        raise NotImplementedError
-
-    def train_epoch(self, model, X, y, batch_size, shuffle):
-        """
-        Обучает модель в течение одной эпохи.
-
-        Args:
-            model: Обучаемая модель.
-            X (array-like): Входные данные.
-            y (array-like): Целевые значения.
-            batch_size (int): Размер батча.
-            shuffle (bool): Перемешивать ли данные перед каждой эпохой.
+            network: Экземпляр нейронной сети.
 
         Returns:
-            float: Среднее значение функции потерь за эпоху.
+            list: История потерь по эпохам.
         """
-        epoch_loss = 0
-        for X_batch, y_batch in batch_iterator(X, y, batch_size, shuffle):
-            batch_loss = self.train_batch(model, X_batch, y_batch)
-            epoch_loss += batch_loss
-        return epoch_loss / (len(X) // batch_size)
-
-    def train_batch(self, model, X_batch, y_batch):
+        loss_history = []
+        
+        r = range(network.max_epochs)
+        if network.verbose:
+            r = tqdm(r)
+        
+        for i in r:
+            if network.shuffle:
+                network.shuffle_dataset()
+            
+            start_time = time.time()
+            loss = self.train_epoch(network)
+            loss_history.append(loss)
+            if network.verbose:
+                msg = f"Epoch:{i}, train loss: {loss}"
+                if network.log_metric:
+                    msg += f", train {network.metric_name}: {network.error()}"
+                msg += f", elapsed: {time.time() - start_time:.2f} sec."
+                logging.info(msg)
+        
+        return loss_history
+    
+    def update(self, network):
         """
-        Обучает модель на одном батче данных.
+        Выполняет обновление параметров сети.
 
         Args:
-            model: Обучаемая модель.
-            X_batch (array-like): Батч входных данных.
-            y_batch (array-like): Батч целевых значений.
+            network: Экземпляр нейронной сети.
+        """
+        raise NotImplementedError("Метод update должен быть реализован в подклассе.")
+    
+    def train_epoch(self, network):
+        """
+        Тренирует сеть в течение одной эпохи.
+
+        Args:
+            network: Экземпляр нейронной сети.
 
         Returns:
-            float: Значение функции потерь на батче.
+            float: Средняя ошибка за эпоху.
         """
-        y_pred = model.forward(X_batch)
-        loss = model.loss(y_batch, y_pred)
-        grads = model.backward(y_batch, y_pred)
-        self.update(model.parameters.weights, grads)
+        losses = []
+        
+        X_batch = batch_iterator(network.X, network.batch_size)
+        y_batch = batch_iterator(network.y, network.batch_size)
+        
+        batch = zip(X_batch, y_batch)
+        
+        for X, y in tqdm(batch,
+                         total=int(np.ceil(network.n_samples / network.batch_size)),
+                         disable=not network.very_verbose):
+            loss = np.mean(network.update(X, y))
+            self.update(network)
+            losses.append(loss)
+        
+        return np.mean(losses)
+    
+    def train_batch(self, network, X, y):
+        """
+        Тренирует сеть на одном батче данных.
+
+        Args:
+            network: Экземпляр нейронной сети.
+            X: Входные данные.
+            y: Истинные значения.
+
+        Returns:
+            float: Потеря для данного батча.
+        """
+        loss = np.mean(network.update(X, y))
+        self.update(network)
         return loss
+    
+    def setup(self, network):
+        """
+        Инициализирует дополнительные переменные.
 
-    def setup(self, model):
+        Args:
+            network: Экземпляр нейронной сети.
         """
-        Создаёт дополнительные переменные перед началом оптимизации.
-        """
-        pass
+        raise NotImplementedError("Метод setup должен быть реализован в подклассе.")
 
 
 class SGD(Optimizer):
     """
     Стохастический градиентный спуск (SGD).
     """
-
-    def update(self, params, grads):
-        for name in params:
-            params[name] -= self.learning_rate * grads[name]
+    
+    def __init__(self, learning_rate=0.01, momentum=0.9, decay=0.0, nesterov=False):
+        """
+        Args:
+            learning_rate (float): Начальная скорость обучения.
+            momentum (float): Коэффициент момента.
+            decay (float): Коэффициент затухания скорости обучения.
+            nesterov (bool): Использовать ли Nesterov momentum.
+        """
+        self.nesterov = nesterov
+        self.decay = decay
+        self.momentum = momentum
+        self.lr = learning_rate
+        self.iteration = 0
+        self.velocity = None
+    
+    def update(self, network):
+        lr = self.lr * (1.0 / (1.0 + self.decay * self.iteration))
+        
+        for i, layer in enumerate(network.parametric_layers):
+            for n in layer.parameters.keys():
+                grad = layer.parameters.grad[n]
+                update = self.momentum * self.velocity[i][n] - lr * grad
+                self.velocity[i][n] = update
+                if self.nesterov:
+                    update = self.momentum * self.velocity[i][n] - lr * grad
+                layer.parameters.step(n, update)
+        self.iteration += 1
+    
+    def setup(self, network):
+        self.velocity = defaultdict(dict)
+        for i, layer in enumerate(network.parametric_layers):
+            for n in layer.parameters.keys():
+                self.velocity[i][n] = np.zeros_like(layer.parameters[n])
 
 
 class Adagrad(Optimizer):
     """
     Оптимизатор Adagrad.
     """
-
-    def setup(self, model):
-        self.accumulators = {k: np.zeros_like(v) for k, v in model.parameters.weights.items()}
-
-    def update(self, params, grads):
-        for name in params:
-            self.accumulators[name] += grads[name] ** 2
-            params[name] -= self.learning_rate * grads[name] / (np.sqrt(self.accumulators[name]) + 1e-8)
+    
+    def __init__(self, learning_rate=0.01, epsilon=1e-8):
+        """
+        Args:
+            learning_rate (float): Скорость обучения.
+            epsilon (float): Небольшое значение для предотвращения деления на ноль.
+        """
+        self.eps = epsilon
+        self.lr = learning_rate
+    
+    def update(self, network):
+        for i, layer in enumerate(network.parametric_layers):
+            for n in layer.parameters.keys():
+                grad = layer.parameters.grad[n]
+                self.accu[i][n] += grad ** 2
+                step = self.lr * grad / (np.sqrt(self.accu[i][n]) + self.eps)
+                layer.parameters.step(n, -step)
+    
+    def setup(self, network):
+        self.accu = defaultdict(dict)
+        for i, layer in enumerate(network.parametric_layers):
+            for n in layer.parameters.keys():
+                self.accu[i][n] = np.zeros_like(layer.parameters[n])
 
 
 class Adadelta(Optimizer):
     """
     Оптимизатор Adadelta.
     """
-
-    def setup(self, model):
+    
+    def __init__(self, learning_rate=1.0, rho=0.95, epsilon=1e-8):
         """
-        Инициализирует внутренние переменные оптимизатора.
-
         Args:
-            model: Модель, параметры которой будут оптимизироваться.
+            learning_rate (float): Скорость обучения.
+            rho (float): Коэффициент затухания.
+            epsilon (float): Небольшое значение для предотвращения деления на ноль.
         """
-        self.accumulators = {}
-        self.deltas = {}
-        self.rho = 0.95
-
-        for layer_name, params in model.parameters.items():
-            for param_name, param_value in params.items():
-                key = f"{layer_name}_{param_name}"
-                self.accumulators[key] = np.zeros_like(param_value)
-                self.deltas[key] = np.zeros_like(param_value)
-
-    def update(self, params, grads):
-        """
-        Выполняет обновление параметров модели.
-
-        Args:
-            params (dict): Параметры модели.
-            grads (dict): Градиенты параметров.
-        """
-        for layer_name, param_group in params.items():
-            if layer_name not in grads:  # Пропускаем, если градиенты для слоя отсутствуют
-                continue
-            for param_name, param_value in param_group.items():
-                key = f"{layer_name}_{param_name}"
-                self.accumulators[key] = (
-                    self.rho * self.accumulators[key]
-                    + (1 - self.rho) * grads[layer_name][param_name] ** 2
-                )
-                update = (
-                    grads[layer_name][param_name]
-                    * np.sqrt(self.deltas[key] + 1e-8)
-                    / np.sqrt(self.accumulators[key] + 1e-8)
-                )
-                param_group[param_name] -= update
-                self.deltas[key] = (
-                    self.rho * self.deltas[key] + (1 - self.rho) * update ** 2
-                )
+        self.rho = rho
+        self.eps = epsilon
+        self.lr = learning_rate
+    
+    def update(self, network):
+        for i, layer in enumerate(network.parametric_layers):
+            for n in layer.parameters.keys():
+                grad = layer.parameters.grad[n]
+                self.accu[i][n] = self.rho * self.accu[i][n] + (1.0 - self.rho) * grad ** 2
+                step = grad * np.sqrt(self.d_accu[i][n] + self.eps) / np.sqrt(self.accu[i][n] + self.eps)
+                
+                layer.parameters.step(n, -step * self.lr)
+                self.d_accu[i][n] = self.rho * self.d_accu[i][n] + (1.0 - self.rho) * step ** 2
+    
+    def setup(self, network):
+        self.accu = defaultdict(dict)
+        self.d_accu = defaultdict(dict)
+        for i, layer in enumerate(network.parametric_layers):
+            for n in layer.parameters.keys():
+                self.accu[i][n] = np.zeros_like(layer.parameters[n])
+                self.d_accu[i][n] = np.zeros_like(layer.parameters[n])
 
 
 class RMSprop(Optimizer):
     """
     Оптимизатор RMSprop.
     """
-
-    def setup(self, model):
-        self.accumulators = {k: np.zeros_like(v) for k, v in model.parameters.weights.items()}
-        self.rho = 0.9
-
-    def update(self, params, grads):
-        for name in params:
-            self.accumulators[name] = self.rho * self.accumulators[name] + (1 - self.rho) * grads[name] ** 2
-            params[name] -= self.learning_rate * grads[name] / (np.sqrt(self.accumulators[name]) + 1e-8)
+    
+    def __init__(self, learning_rate=0.001, rho=0.9, epsilon=1e-8):
+        """
+        Args:
+            learning_rate (float): Скорость обучения.
+            rho (float): Коэффициент затухания.
+            epsilon (float): Небольшое значение для предотвращения деления на ноль.
+        """
+        self.eps = epsilon
+        self.rho = rho
+        self.lr = learning_rate
+    
+    def update(self, network):
+        for i, layer in enumerate(network.parametric_layers):
+            for n in layer.parameters.keys():
+                grad = layer.parameters.grad[n]
+                self.accu[i][n] = (self.rho * self.accu[i][n]) + (1.0 - self.rho) * (grad ** 2)
+                step = self.lr * grad / (np.sqrt(self.accu[i][n]) + self.eps)
+                layer.parameters.step(n, -step)
+    
+    def setup(self, network):
+        self.accu = defaultdict(dict)
+        for i, layer in enumerate(network.parametric_layers):
+            for n in layer.parameters.keys():
+                self.accu[i][n] = np.zeros_like(layer.parameters[n])
 
 
 class Adam(Optimizer):
     """
     Оптимизатор Adam.
     """
-
-    def setup(self, model):
-        self.m = {}
-        self.v = {}
-        self.beta1 = 0.9
-        self.beta2 = 0.999
-        self.t = 0
-
-        for layer_name, params in model.parameters.items():
-            for param_name, param_value in params.items():
-                self.m[f"{layer_name}_{param_name}"] = np.zeros_like(param_value)
-                self.v[f"{layer_name}_{param_name}"] = np.zeros_like(param_value)
-
-    def update(self, params, grads):
+    
+    def __init__(self, learning_rate=0.001, beta_1=0.9, beta_2=0.999, epsilon=1e-8):
         """
-        Выполняет обновление параметров модели.
-
         Args:
-            params (dict): Параметры модели.
-            grads (dict): Градиенты параметров.
+            learning_rate (float): Скорость обучения.
+            beta_1 (float): Коэффициент экспоненциального сглаживания для первого момента.
+            beta_2 (float): Коэффициент экспоненциального сглаживания для второго момента.
+            epsilon (float): Небольшое значение для предотвращения деления на ноль.
         """
+        self.epsilon = epsilon
+        self.beta_2 = beta_2
+        self.beta_1 = beta_1
+        self.lr = learning_rate
+        self.iterations = 0
+        self.t = 1
+    
+    def update(self, network):
+        for i, layer in enumerate(network.parametric_layers):
+            for n in layer.parameters.keys():
+                grad = layer.parameters.grad[n]
+                self.ms[i][n] = (self.beta_1 * self.ms[i][n]) + (1.0 - self.beta_1) * grad
+                self.vs[i][n] = (self.beta_2 * self.vs[i][n]) + (1.0 - self.beta_2) * grad ** 2
+                lr = self.lr * np.sqrt(1.0 - self.beta_2 ** self.t) / (1.0 - self.beta_1 ** self.t)
+                
+                step = lr * self.ms[i][n] / (np.sqrt(self.vs[i][n]) + self.epsilon)
+                layer.parameters.step(n, -step)
         self.t += 1
-        for layer_name, param_group in params.items():
-            for param_name, param_value in param_group.items():
-                key = f"{layer_name}_{param_name}"
-                self.m[key] = self.beta1 * self.m[key] + (1 - self.beta1) * grads[layer_name][param_name]
-                self.v[key] = self.beta2 * self.v[key] + (1 - self.beta2) * (grads[layer_name][param_name] ** 2)
-                m_hat = self.m[key] / (1 - self.beta1 ** self.t)
-                v_hat = self.v[key] / (1 - self.beta2 ** self.t)
-                param_group[param_name] -= self.learning_rate * m_hat / (np.sqrt(v_hat) + 1e-8)
+    
+    def setup(self, network):
+        self.ms = defaultdict(dict)
+        self.vs = defaultdict(dict)
+        for i, layer in enumerate(network.parametric_layers):
+            for n in layer.parameters.keys():
+                self.ms[i][n] = np.zeros_like(layer.parameters[n])
+                self.vs[i][n] = np.zeros_like(layer.parameters[n])
 
 
 class Adamax(Optimizer):
     """
     Оптимизатор Adamax.
     """
-
-    def setup(self, model):
-        self.m = {k: np.zeros_like(v) for k, v in model.parameters.weights.items()}
-        self.u = {k: np.zeros_like(v) for k, v in model.parameters.weights.items()}
-        self.beta1 = 0.9
-        self.beta2 = 0.999
-        self.t = 0
-
-    def update(self, params, grads):
+    
+    def __init__(self, learning_rate=0.002, beta_1=0.9, beta_2=0.999, epsilon=1e-8):
+        """
+        Args:
+            learning_rate (float): Скорость обучения.
+            beta_1 (float): Коэффициент экспоненциального сглаживания для первого момента.
+            beta_2 (float): Коэффициент экспоненциального сглаживания для второго момента.
+            epsilon (float): Небольшое значение для предотвращения деления на ноль.
+        """
+        self.epsilon = epsilon
+        self.beta_2 = beta_2
+        self.beta_1 = beta_1
+        self.lr = learning_rate
+        self.t = 1
+    
+    def update(self, network):
+        for i, layer in enumerate(network.parametric_layers):
+            for n in layer.parameters.keys():
+                grad = layer.parameters.grad[n]
+                self.ms[i][n] = self.beta_1 * self.ms[i][n] + (1.0 - self.beta_1) * grad
+                self.us[i][n] = np.maximum(self.beta_2 * self.us[i][n], np.abs(grad))
+                
+                step = self.lr / (1 - self.beta_1 ** self.t) * self.ms[i][n] / (self.us[i][n] + self.epsilon)
+                layer.parameters.step(n, -step)
         self.t += 1
-        for name in params:
-            self.m[name] = self.beta1 * self.m[name] + (1 - self.beta1) * grads[name]
-            self.u[name] = np.maximum(self.beta2 * self.u[name], np.abs(grads[name]))
-            m_hat = self.m[name] / (1 - self.beta1 ** self.t)
-            params[name] -= self.learning_rate * m_hat / (self.u[name] + 1e-8)
+    
+    def setup(self, network):
+        self.ms = defaultdict(dict)
+        self.us = defaultdict(dict)
+        for i, layer in enumerate(network.parametric_layers):
+            for n in layer.parameters.keys():
+                self.ms[i][n] = np.zeros_like(layer.parameters[n])
+                self.us[i][n] = np.zeros_like(layer.parameters[n])

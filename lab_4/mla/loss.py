@@ -1,31 +1,32 @@
-from .metrics import binary_crossentropy, hinge, logloss, mae, mse
+from typing import Callable
 
-# Дополнительный алиас для логарифмической функции потерь
+from .metrics import mse, logloss, mae, hinge, binary_crossentropy
+
+# Alias for categorical crossentropy
 categorical_crossentropy = logloss
 
-def get_loss(name):
+
+def get_loss(name: str) -> Callable:
     """
     Возвращает функцию потерь по её имени.
 
     Args:
-        name (str): Название функции потерь.
+        name (str): Имя функции потерь.
 
     Returns:
-        function: Функция потерь.
+        Callable: Функция потерь.
 
     Raises:
-        ValueError: Если функция потерь с указанным именем не найдена.
+        ValueError: Если функция потерь с таким именем не найдена.
     """
     losses = {
-        'binary_crossentropy': binary_crossentropy,
-        'categorical_crossentropy': categorical_crossentropy,
-        'hinge': hinge,
-        'logloss': logloss,
-        'mae': mae,
-        'mse': mse,
+        "mse": mse,
+        "logloss": logloss,
+        "mae": mae,
+        "hinge": hinge,
+        "binary_crossentropy": binary_crossentropy,
+        "categorical_crossentropy": categorical_crossentropy,
     }
-
-    if name not in losses:
-        raise ValueError(f"Неизвестная функция потерь: {name}")
-
-    return losses[name]
+    if name in losses:
+        return losses[name]
+    raise ValueError(f"Invalid loss function: {name}")
